@@ -1,23 +1,27 @@
-# E-reader Development Rules
+# E-reader
 
-Este diretório contém as regras e guidelines que devem orientar desenvolvimento humano e por agentes de IA.
+Leitor Android local-first para EPUB, PDF e CBZ. O projeto requer **JDK 17** e Android SDK API 36 (target API 35).
 
-## Ordem de leitura recomendada
+## Executar
 
-1. `PROJECT_CONTEXT.md`
-2. `PRODUCT_REQUIREMENTS.md`
-3. `ARCHITECTURE.md`
-4. `UX_GUIDELINES.md`
-5. `PDF_READER_GUIDELINES.md`
-6. `COMIC_READER_GUIDELINES.md`
-7. `DATA_MODEL.md`
-8. `CODING_STANDARDS.md`
-9. `TESTING_GUIDELINES.md`
-10. `ROADMAP.md`
-11. `AI_DEVELOPMENT_RULES.md`
+1. Abra a pasta no Android Studio.
+2. Configure o Android SDK se solicitado e sincronize o Gradle.
+3. Execute `./gradlew testDebugUnitTest` e `./gradlew assembleDebug`.
 
-## Regra principal
+O leitor PDF usa `PdfRenderer` nativo e o leitor EPUB usa Readium Kotlin Toolkit. Os três leitores persistem progresso e marcadores localmente.
 
-O aplicativo existe para proporcionar uma experiência de leitura melhor no celular, especialmente para PDFs.
+O estado detalhado do escopo e das validações está em [`docs/MVP_REFINEMENT_REPORT.md`](docs/MVP_REFINEMENT_REPORT.md). O build atual é testável, mas ainda não cumpre todos os critérios documentados para declarar o MVP concluído.
 
-Não priorizar quantidade de features sobre qualidade de leitura.
+## Arquivos de teste no emulador
+
+Com o Pixel 9 aberto ou fechado, execute no PowerShell:
+
+```powershell
+.\tools\prepare_emulator_test_files.cmd
+```
+
+O script gera um EPUB, um PDF e um CBZ válidos, inicia o AVD `Pixel_9` quando necessário e envia os arquivos para `Download/E-reader-tests`. Para usar outro dispositivo conectado, informe o serial exibido por `adb devices`:
+
+```powershell
+.\tools\prepare_emulator_test_files.cmd -Serial emulator-5554
+```
