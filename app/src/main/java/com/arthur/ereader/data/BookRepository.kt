@@ -16,6 +16,7 @@ import com.arthur.ereader.domain.model.*
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
@@ -29,8 +30,10 @@ class BookRepository @Inject constructor(
     private val settingsDao: ReaderSettingsDao,
     private val resolver: ContentResolver,
     private val covers: BookCoverGenerator,
+    private val cbrConverter: CbrConverter,
 ) {
     private val settingsMutex = Mutex()
+    private val importMutex = Mutex()
 
     fun observe() = dao.observe().map { it.map(::toDomain) }
 
@@ -42,25 +45,71 @@ class BookRepository @Inject constructor(
         }
     }
 
-    suspend fun import(uri: Uri): Result<Long> = runCatching {
-        dao.getByUri(uri.toString())?.let { return@runCatching it.id }
+    suspend fun import(uri: Uri): Result<Long> = try {
+        Result.success(importMutex.withLock { importLocked(uri) })
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        Result.failure(error)
+    }
+
+    suspend fun importAll(uris: List<Uri>): BatchImportResult {
+        val uniqueUris = uris.distinctBy(Uri::toString)
+        var imported = 0
+        val failures = mutableListOf<String>()
+        uniqueUris.forEach { uri ->
+            import(uri).fold(
+                onSuccess = { imported++ },
+                onFailure = { failures += it.message ?: "Não foi possível importar este arquivo." },
+            )
+        }
+        return BatchImportResult(total = uniqueUris.size, imported = imported, failures = failures)
+    }
+
+    private suspend fun importLocked(uri: Uri): Long {
+        dao.getByUri(uri.toString())?.let { return it.id }
         val details = queryDetails(uri)
-        val format = FormatTools.detect(details.name, resolver.getType(uri))
-            ?: error("Formato não suportado. Selecione EPUB, PDF ou CBZ.")
-        resolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        val id = dao.insert(BookEntity(title = details.name.substringBeforeLast('.'), author = null, uri = uri.toString(), format = format.name, contentType = when (format) { BookFormat.CBZ -> ContentType.COMIC.name; BookFormat.PDF -> ContentType.DOCUMENT.name; BookFormat.EPUB -> ContentType.BOOK.name }, fileSize = details.size, dateAdded = System.currentTimeMillis(), lastReadAt = null, favorite = false))
+        val mimeType = resolver.getType(uri)
+        val isCbr = FormatTools.isCbr(details.name, mimeType)
+        val format = FormatTools.detect(details.name, mimeType)
+            ?: if (isCbr) BookFormat.CBZ else error("Formato não suportado. Selecione EPUB, PDF, CBZ ou CBR.")
+
+        val storedUri: Uri
+        val storedSize: Long
+        var converted = false
+        if (isCbr) {
+            val destination = cbrConverter.destinationUri(uri, details.name)
+            dao.getByUri(destination.toString())?.let { return it.id }
+            val comic = cbrConverter.convert(uri, details.name)
+            storedUri = comic.uri
+            storedSize = comic.size
+            converted = true
+        } else {
+            resolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            storedUri = uri
+            storedSize = details.size
+        }
+
+        val id = try {
+            dao.insert(BookEntity(title = details.name.substringBeforeLast('.'), author = null, uri = storedUri.toString(), format = format.name, contentType = when (format) { BookFormat.CBZ -> ContentType.COMIC.name; BookFormat.PDF -> ContentType.DOCUMENT.name; BookFormat.EPUB -> ContentType.BOOK.name }, fileSize = storedSize, dateAdded = System.currentTimeMillis(), lastReadAt = null, favorite = false))
+        } catch (error: Exception) {
+            if (converted) cbrConverter.deleteConverted(storedUri.toString())
+            throw error
+        }
         dao.get(id)?.let { entity ->
             dao.cover(id, covers.generate(toDomain(entity)).orEmpty())
         }
-        id
+        return id
     }
 
     suspend fun favorite(id: Long, value: Boolean) = dao.favorite(id, value)
     suspend fun delete(id: Long) {
+        val storedUri = get(id)?.uri
         progressDao.deleteForBook(id)
         bookmarkDao.deleteForBook(id)
         dao.delete(id)
         covers.delete(id)
+        storedUri?.let(cbrConverter::deleteConverted)
     }
 
     fun observeBookmarks(book: Book) = bookmarkDao.observe(book.id).map { entities ->
@@ -250,4 +299,19 @@ class BookRepository @Inject constructor(
         runCatching { enumValueOf<T>(this) }.getOrDefault(default)
 
     private data class FileDetails(val name: String, val size: Long)
+}
+
+data class BatchImportResult(
+    val total: Int,
+    val imported: Int,
+    val failures: List<String>,
+) {
+    fun message(): String = when {
+        total == 0 -> "Nenhum arquivo foi selecionado."
+        failures.isEmpty() && imported == 1 -> "Arquivo importado e adicionado à biblioteca."
+        failures.isEmpty() -> "$imported arquivos importados e adicionados à biblioteca."
+        imported == 0 && total == 1 -> failures.first()
+        imported == 0 -> "Nenhum dos $total arquivos pôde ser importado. ${failures.first()}"
+        else -> "$imported de $total arquivos foram importados; ${failures.size} falharam. ${failures.first()}"
+    }
 }

@@ -10,4 +10,9 @@ class FormatToolsTest {
   assertEquals(BookFormat.EPUB, FormatTools.detect("livro", "application/epub+zip"))
   assertEquals(BookFormat.CBZ, FormatTools.detect("quadrinho", "application/vnd.comicbook+zip"))
  }
+ @Test fun `detects cbr by extension or mime`() {
+  assertEquals(true, FormatTools.isCbr("quadrinho.CBR", null))
+  assertEquals(true, FormatTools.isCbr("quadrinho", "application/vnd.comicbook-rar"))
+  assertEquals(false, FormatTools.isCbr("quadrinho.cbz", "application/vnd.comicbook+zip"))
+ }
 }

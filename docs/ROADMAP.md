@@ -101,7 +101,6 @@ Experiências:
 
 ## Pós-MVP
 
-- CBR;
 - Column Mode PDF;
 - busca avançada;
 - highlights;

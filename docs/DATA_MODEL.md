@@ -33,8 +33,9 @@ Representa o formato físico:
 
 - EPUB;
 - PDF;
-- CBZ;
-- CBR futuramente.
+- CBZ, incluindo a cópia gerenciada resultante da conversão de um CBR.
+
+CBR não é persistido como `fileType`: ele é convertido antes da criação do `Book`.
 
 ### contentType
 

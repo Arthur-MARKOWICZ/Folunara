@@ -7,6 +7,10 @@ object FormatTools {
         "epub" -> BookFormat.EPUB; "pdf" -> BookFormat.PDF; "cbz" -> BookFormat.CBZ; else -> null
     }
 
+    fun isCbr(name: String, mimeType: String?): Boolean =
+        name.substringAfterLast('.', "").equals("cbr", ignoreCase = true) ||
+            mimeType?.lowercase() in setOf("application/vnd.comicbook-rar", "application/x-cbr", "application/x-rar-compressed")
+
     fun detect(name: String, mimeType: String?): BookFormat? = fromName(name) ?: when (mimeType?.lowercase()) {
         "application/epub+zip" -> BookFormat.EPUB
         "application/pdf" -> BookFormat.PDF

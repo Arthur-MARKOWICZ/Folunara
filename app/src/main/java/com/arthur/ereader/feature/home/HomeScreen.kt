@@ -40,6 +40,8 @@ data class HomeUiState(
 class HomeViewModel @Inject constructor(private val books: BookRepository) : ViewModel() {
     private val _messages = MutableSharedFlow<String>()
     val messages = _messages.asSharedFlow()
+    private val _importing = MutableStateFlow(false)
+    val importing = _importing.asStateFlow()
     val state = books.observeWithProgress().map { source ->
         HomeUiState(
             reading = source.filter { (it.progress?.percentage ?: 0f) in 0.001f..0.999f }
@@ -49,11 +51,14 @@ class HomeViewModel @Inject constructor(private val books: BookRepository) : Vie
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
 
-    fun import(uri: Uri) = viewModelScope.launch {
-        books.import(uri).fold(
-            onSuccess = { _messages.emit("Livro importado com sucesso.") },
-            onFailure = { _messages.emit(it.message ?: "Não foi possível importar este arquivo.") },
-        )
+    fun import(uris: List<Uri>) = viewModelScope.launch {
+        if (uris.isEmpty()) return@launch
+        if (!_importing.compareAndSet(expect = false, update = true)) return@launch
+        try {
+            _messages.emit(books.importAll(uris).message())
+        } finally {
+            _importing.value = false
+        }
     }
 }
 
@@ -67,8 +72,9 @@ fun HomeScreen(
     vm: HomeViewModel = hiltViewModel(),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val importing by vm.importing.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { it?.let(vm::import) }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments(), vm::import)
     LaunchedEffect(vm) { vm.messages.collect { snackbar.showSnackbar(it) } }
     Scaffold(
         topBar = {
@@ -80,9 +86,12 @@ fun HomeScreen(
         snackbarHost = { SnackbarHost(snackbar) },
         floatingActionButton = {
             ExtendedFloatingActionButton(
-                onClick = { picker.launch(arrayOf("*/*")) },
-                icon = { Icon(Icons.Default.Add, null) },
-                text = { Text("Importar") },
+                onClick = { if (!importing) picker.launch(arrayOf("*/*")) },
+                icon = {
+                    if (importing) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    else Icon(Icons.Default.Add, null)
+                },
+                text = { Text(if (importing) "Importando…" else "Importar") },
             )
         },
     ) { padding ->
@@ -113,7 +122,7 @@ fun HomeScreen(
                 item {
                     Column(Modifier.fillMaxWidth().padding(32.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("Sua biblioteca está vazia", style = MaterialTheme.typography.headlineSmall)
-                        Text("Importe um EPUB, PDF ou CBZ para começar.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Importe um EPUB, PDF, CBZ ou CBR para começar.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }

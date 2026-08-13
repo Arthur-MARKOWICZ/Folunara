@@ -29,7 +29,7 @@ fun AboutScreen(onOpenDrawer: () -> Unit) {
             Text("E-reader", style = MaterialTheme.typography.headlineMedium)
             Text("Versão ${BuildConfig.VERSION_NAME}", color = MaterialTheme.colorScheme.onSurfaceVariant)
             HorizontalDivider()
-            Text("Leitor local para EPUB, PDF e CBZ, pensado para uma experiência confortável de leitura no celular.")
+            Text("Leitor local para EPUB, PDF, CBZ e CBR, pensado para uma experiência confortável de leitura no celular.")
             Text("Seus livros, coleções, configurações e progresso ficam armazenados neste dispositivo. O aplicativo não exige conta nem conexão com um servidor.")
         }
     }

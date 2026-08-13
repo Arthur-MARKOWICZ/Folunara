@@ -11,11 +11,8 @@ Não reutilizar cegamente a UX de PDF textual.
 ### MVP
 
 - CBZ;
+- CBR convertido automaticamente para CBZ durante a importação;
 - PDF em Comic Mode.
-
-### Pós-MVP
-
-- CBR.
 
 ## 3. CBZ
 
@@ -29,6 +26,8 @@ Regras:
 - não carregar todas as imagens em memória;
 - prevenir ZIP bombs;
 - carregar páginas sob demanda.
+
+CBR não deve chegar ao leitor: a importação preserva o original, valida as imagens e mantém uma cópia CBZ privada gerenciada pelo app.
 
 ## 4. Modos MVP
 

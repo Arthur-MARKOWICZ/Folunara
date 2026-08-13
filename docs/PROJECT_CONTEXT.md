@@ -34,10 +34,7 @@ O aplicativo deve funcionar especialmente bem com:
 - EPUB
 - PDF
 - CBZ
-
-### Pós-MVP
-
-- CBR
+- CBR por conversão automática para CBZ na importação
 
 ### Somente se houver necessidade real
 
@@ -102,7 +99,7 @@ O objetivo é que o usuário prefira ler no aplicativo em vez de um visualizador
 Fluxo básico obrigatório:
 
 1. Abrir aplicativo;
-2. Importar EPUB, PDF ou CBZ;
+2. Importar EPUB, PDF, CBZ ou CBR;
 3. Livro aparecer na biblioteca;
 4. Abrir livro;
 5. Ler;

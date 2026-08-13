@@ -91,7 +91,10 @@ fun ComicReaderScreen(
             error = "Não foi possível abrir o CBZ: ${it.message ?: "arquivo inválido."}"
         }
     }
-    DisposableEffect(archive) { onDispose { archive?.close() } }
+    DisposableEffect(archive) {
+        val openedArchive = archive
+        onDispose { openedArchive?.close() }
+    }
 
     LaunchedEffect(saved, archive, positionLoaded, settings.direction, settings.displayMode) {
         val count = archive?.entries?.size ?: 0

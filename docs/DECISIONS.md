@@ -12,6 +12,7 @@
 
 - Content Fit usa uma heurística visual conservadora baseada em pixels quase brancos e acrescenta uma margem de segurança de 2%. Ele nunca altera o arquivo; o usuário pode voltar a **Original** a qualquer momento.
 - O leitor CBZ enumera somente imagens aceitas, ordena páginas naturalmente, limita o arquivo a 10.000 entradas e cada imagem descompactada a 80 MB. Ele carrega apenas a página atual.
+- CBR é convertido para CBZ durante a importação com Junrar. A cópia convertida fica no armazenamento privado e é removida com o item da biblioteca; o arquivo CBR original não é alterado.
 - PDF em Comic Mode, cache persistente de crops e preferências por livro permanecem pendentes: exigem a validação no aparelho e uma migração de schema antes de persistir novas preferências.
 
 ## Limitações conhecidas

@@ -9,7 +9,8 @@ O MVP é um leitor local. Ele não é uma plataforma social, loja de livros ou s
 ### Obrigatório
 
 - importar arquivos do dispositivo;
-- reconhecer EPUB, PDF e CBZ;
+- selecionar e importar vários arquivos, especialmente PDFs, em uma única operação;
+- reconhecer EPUB, PDF, CBZ e CBR, convertendo CBR automaticamente para CBZ antes de adicioná-lo à biblioteca;
 - exibir capa quando disponível;
 - exibir título;
 - exibir autor quando disponível;
@@ -175,7 +176,7 @@ Possível fluxo:
 
 ## 8. Comic Reader
 
-Deve suportar inicialmente CBZ e futuramente CBR.
+Deve suportar CBZ e importar CBR por conversão automática para CBZ. O leitor continua operando somente sobre CBZ.
 
 ### MVP
 

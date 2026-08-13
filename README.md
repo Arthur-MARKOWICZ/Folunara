@@ -1,6 +1,8 @@
 # E-reader
 
-Leitor Android local-first para EPUB, PDF e CBZ. O projeto requer **JDK 17** e Android SDK API 36 (target API 35).
+Leitor Android local-first para EPUB, PDF, CBZ e CBR. Arquivos CBR são convertidos automaticamente para CBZ no armazenamento privado do app durante a importação. O projeto requer **JDK 17** e Android SDK API 36 (target API 35).
+
+O seletor de importação aceita múltiplos arquivos na mesma operação, incluindo vários PDFs de uma vez.
 
 ## Executar
 

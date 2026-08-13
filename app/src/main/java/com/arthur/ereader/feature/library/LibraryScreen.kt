@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -85,6 +86,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
@@ -113,6 +115,8 @@ class LibraryViewModel @Inject constructor(
     private val query = MutableStateFlow("")
     private val _messages = MutableSharedFlow<String>()
     val messages = _messages.asSharedFlow()
+    private val _importing = MutableStateFlow(false)
+    val importing = _importing.asStateFlow()
 
     val state = combine(
         books.observeWithProgress(),
@@ -146,11 +150,14 @@ class LibraryViewModel @Inject constructor(
         viewModelScope.launch { books.backfillCovers() }
     }
 
-    fun import(uri: Uri) = viewModelScope.launch {
-        books.import(uri).fold(
-            onSuccess = { _messages.emit("Livro importado com sucesso.") },
-            onFailure = { _messages.emit(it.message ?: "Não foi possível importar este arquivo.") },
-        )
+    fun import(uris: List<Uri>) = viewModelScope.launch {
+        if (uris.isEmpty()) return@launch
+        if (!_importing.compareAndSet(expect = false, update = true)) return@launch
+        try {
+            _messages.emit(books.importAll(uris).message())
+        } finally {
+            _importing.value = false
+        }
     }
     fun favorite(book: Book) = viewModelScope.launch { books.favorite(book.id, !book.favorite) }
     fun remove(book: Book) = viewModelScope.launch { books.delete(book.id) }
@@ -176,12 +183,11 @@ fun LibraryScreen(
     vm: LibraryViewModel = hiltViewModel(),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val importing by vm.importing.collectAsStateWithLifecycle()
     var removeCandidate by remember { mutableStateOf<Book?>(null) }
     var collectionCandidate by remember { mutableStateOf<Book?>(null) }
     val snackbar = remember { SnackbarHostState() }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
-        it?.let(vm::import)
-    }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments(), vm::import)
     LaunchedEffect(vm) { vm.messages.collect { snackbar.showSnackbar(it) } }
 
     Scaffold(
@@ -197,9 +203,13 @@ fun LibraryScreen(
         },
         floatingActionButton = {
             ExtendedFloatingActionButton(
-                onClick = { picker.launch(arrayOf("*/*")) },
-                icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                text = { Text("Importar") },
+                onClick = { if (!importing) picker.launch(arrayOf("*/*")) },
+                icon = {
+                    if (importing) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    else Icon(Icons.Default.Add, contentDescription = null)
+                },
+                text = { Text(if (importing) "Importando…" else "Importar") },
+                expanded = true,
             )
         },
         snackbarHost = { SnackbarHost(snackbar) },
@@ -212,9 +222,9 @@ fun LibraryScreen(
             if (state.items.isEmpty()) {
                 UiStatePanel(
                     title = if (state.query.isBlank()) "Sua estante está vazia" else "Nenhum livro encontrado",
-                    message = if (state.query.isBlank()) "Importe um EPUB, PDF ou CBZ para começar." else "Tente outro termo ou filtro.",
+                    message = if (state.query.isBlank()) "Importe um EPUB, PDF, CBZ ou CBR para começar." else "Tente outro termo ou filtro.",
                     actionLabel = if (state.query.isBlank()) "Importar livro" else null,
-                    onAction = if (state.query.isBlank()) ({ picker.launch(arrayOf("*/*")) }) else null,
+                    onAction = if (state.query.isBlank()) ({ if (!importing) picker.launch(arrayOf("*/*")) }) else null,
                     modifier = Modifier.weight(1f),
                 )
             } else if (state.layout == LibraryLayoutMode.GRID) {
