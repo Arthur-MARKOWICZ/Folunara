@@ -28,6 +28,8 @@ import com.arthur.ereader.feature.collections.CollectionDetailScreen
 import com.arthur.ereader.feature.collections.CollectionsScreen
 import com.arthur.ereader.feature.home.HomeScreen
 import com.arthur.ereader.feature.library.LibraryScreen
+import com.arthur.ereader.feature.organization.OrganizationScreen
+import com.arthur.ereader.feature.organization.SeriesDetailScreen
 import com.arthur.ereader.feature.settings.SettingsScreen
 import com.arthur.ereader.reader.comic.ComicReaderScreen
 import com.arthur.ereader.reader.epub.EpubReaderScreen
@@ -43,11 +45,14 @@ object AppRoute {
     const val LIBRARY = "library"
     const val COLLECTIONS = "collections"
     const val COLLECTION_DETAIL = "collections/{collectionId}"
+    const val ORGANIZATION = "organization"
+    const val SERIES_DETAIL = "series/{seriesId}"
     const val SETTINGS = "settings"
     const val ABOUT = "about"
     const val READER = "reader/{bookId}"
 
     fun collection(id: Long) = "collections/$id"
+    fun series(id: Long) = "series/$id"
     fun reader(id: Long) = "reader/$id"
 }
 
@@ -80,6 +85,25 @@ fun AppNavigation(navController: NavHostController = rememberNavController()) {
                 )
             }
         }
+        composable(AppRoute.ORGANIZATION) {
+            DrawerDestination(AppRoute.ORGANIZATION, navController) { openDrawer ->
+                OrganizationScreen(
+                    onOpenDrawer = openDrawer,
+                    onOpenSeries = { navController.navigate(AppRoute.series(it)) },
+                    onOpenCollection = { navController.navigate(AppRoute.collection(it)) },
+                    onOpenBook = { navController.navigate(AppRoute.reader(it)) },
+                )
+            }
+        }
+        composable(
+            route = AppRoute.SERIES_DETAIL,
+            arguments = listOf(navArgument("seriesId") { type = NavType.LongType }),
+        ) {
+            SeriesDetailScreen(
+                onBack = { navController.popBackStack() },
+                onOpenBook = { navController.navigate(AppRoute.reader(it)) },
+            )
+        }
         composable(
             route = AppRoute.COLLECTION_DETAIL,
             arguments = listOf(navArgument("collectionId") { type = NavType.LongType }),
@@ -87,6 +111,7 @@ fun AppNavigation(navController: NavHostController = rememberNavController()) {
             CollectionDetailScreen(
                 onBack = { navController.popBackStack() },
                 onOpenBook = { navController.navigate(AppRoute.reader(it.id)) },
+                onOpenSeries = { navController.navigate(AppRoute.series(it)) },
             )
         }
         composable(AppRoute.SETTINGS) {
@@ -121,6 +146,7 @@ private val drawerItems = listOf(
     DrawerItem(AppRoute.HOME, "Início", Icons.Default.Home),
     DrawerItem(AppRoute.LIBRARY, "Biblioteca", Icons.Default.LibraryBooks),
     DrawerItem(AppRoute.COLLECTIONS, "Coleções", Icons.Default.CollectionsBookmark),
+    DrawerItem(AppRoute.ORGANIZATION, "Séries", Icons.Default.FolderCopy),
     DrawerItem(AppRoute.SETTINGS, "Configurações", Icons.Default.Settings),
     DrawerItem(AppRoute.ABOUT, "Sobre", Icons.Default.Info),
 )

@@ -29,6 +29,7 @@ import androidx.lifecycle.viewModelScope
 import com.arthur.ereader.data.BookRepository
 import com.arthur.ereader.data.CollectionRepository
 import com.arthur.ereader.data.LibraryPreferences
+import com.arthur.ereader.data.OrganizationRepository
 import com.arthur.ereader.domain.model.*
 import com.arthur.ereader.ui.components.BookCover
 import com.arthur.ereader.ui.components.UiStatePanel
@@ -160,6 +161,8 @@ data class CollectionDetailUiState(
     val collection: BookCollection? = null,
     val books: List<LibraryBook> = emptyList(),
     val allBooks: List<LibraryBook> = emptyList(),
+    val series: List<Series> = emptyList(),
+    val allSeries: List<Series> = emptyList(),
     val sort: LibrarySortMode = LibrarySortMode.RECENTLY_ADDED,
 )
 
@@ -169,17 +172,23 @@ private enum class CollectionBookAction { ADD, REMOVE }
 class CollectionDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val collections: CollectionRepository,
+    private val organization: OrganizationRepository,
     private val preferences: LibraryPreferences,
     books: BookRepository,
 ) : ViewModel() {
     private val collectionId: Long = checkNotNull(savedStateHandle["collectionId"])
+    private val seriesState = combine(
+        organization.observeSeriesInCollection(collectionId),
+        organization.observeSeries(),
+    ) { selected, all -> selected to all }
     val state = combine(
         collections.observeCollection(collectionId),
         collections.observeBooks(collectionId),
         books.observeWithProgress(),
         preferences.sort,
-    ) { collection, selectedBooks, allBooks, sort ->
-        CollectionDetailUiState(collection, selectedBooks.sortedWith(sort.comparator()), allBooks, sort)
+        seriesState,
+    ) { collection, selectedBooks, allBooks, sort, (selectedSeries, allSeries) ->
+        CollectionDetailUiState(collection, selectedBooks.sortedWith(sort.comparator()), allBooks, selectedSeries, allSeries, sort)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CollectionDetailUiState())
 
     fun setSort(value: LibrarySortMode) = viewModelScope.launch { preferences.setSort(value) }
@@ -193,6 +202,10 @@ class CollectionDetailViewModel @Inject constructor(
         val currentIds = state.value.books.mapTo(mutableSetOf()) { it.book.id }
         collections.setBooksInCollection(collectionId, currentIds - ids)
         done()
+    }
+
+    fun saveSeries(ids: Set<Long>, done: () -> Unit) = viewModelScope.launch {
+        organization.setSeriesInCollection(collectionId, ids).onSuccess { done() }
     }
 
     private fun LibrarySortMode.comparator(): Comparator<LibraryBook> = when (this) {
@@ -209,10 +222,12 @@ class CollectionDetailViewModel @Inject constructor(
 fun CollectionDetailScreen(
     onBack: () -> Unit,
     onOpenBook: (Book) -> Unit,
+    onOpenSeries: (Long) -> Unit,
     vm: CollectionDetailViewModel = hiltViewModel(),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     var bookAction by remember { mutableStateOf<CollectionBookAction?>(null) }
+    var editingSeries by remember { mutableStateOf(false) }
     var sortMenu by remember { mutableStateOf(false) }
     bookAction?.let { action ->
         CollectionBookPickerScreen(
@@ -253,6 +268,9 @@ fun CollectionDetailScreen(
                     IconButton(onClick = { bookAction = CollectionBookAction.ADD }) {
                         Icon(Icons.Default.PlaylistAdd, "Adicionar livros")
                     }
+                    IconButton(onClick = { editingSeries = true }) {
+                        Icon(Icons.Default.AddLink, "Adicionar séries")
+                    }
                     if (state.books.isNotEmpty()) {
                         IconButton(onClick = { bookAction = CollectionBookAction.REMOVE }) {
                             Icon(Icons.Default.PlaylistRemove, "Remover livros")
@@ -262,10 +280,10 @@ fun CollectionDetailScreen(
             )
         },
     ) { padding ->
-        if (state.books.isEmpty()) {
+        if (state.books.isEmpty() && state.series.isEmpty()) {
             UiStatePanel(
                 title = "Coleção vazia",
-                message = "Adicione um ou mais livros da sua Biblioteca.",
+                message = "Adicione livros ou séries da sua Biblioteca.",
                 actionLabel = "Adicionar livros",
                 onAction = { bookAction = CollectionBookAction.ADD },
                 modifier = Modifier.padding(padding),
@@ -275,6 +293,20 @@ fun CollectionDetailScreen(
                 Modifier.fillMaxSize().padding(padding),
                 contentPadding = PaddingValues(vertical = 8.dp),
             ) {
+                if (state.series.isNotEmpty()) {
+                    item { Text("Séries", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) }
+                    items(state.series, key = { "series-${it.id}" }) { series ->
+                        ListItem(
+                            modifier = Modifier.clickable { onOpenSeries(series.id) },
+                            headlineContent = { Text(series.displayName) },
+                            supportingContent = { Text("${series.bookCount} livro(s)${series.publisher?.let { " • $it" }.orEmpty()}") },
+                            leadingContent = { Icon(Icons.Default.CollectionsBookmark, null) },
+                            trailingContent = { Icon(Icons.Default.ChevronRight, "Abrir série") },
+                        )
+                        HorizontalDivider(Modifier.padding(start = 72.dp))
+                    }
+                }
+                if (state.books.isNotEmpty()) item { Text("Livros avulsos", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) }
                 items(state.books, key = { it.book.id }) { item ->
                     ListItem(
                         modifier = Modifier.clickable { onOpenBook(item.book) },
@@ -288,6 +320,65 @@ fun CollectionDetailScreen(
             }
         }
     }
+    if (editingSeries) {
+        CollectionSeriesPickerDialog(
+            collectionName = state.collection?.name ?: "Coleção",
+            series = state.allSeries,
+            selectedIds = state.series.mapTo(mutableSetOf()) { it.id },
+            onDismiss = { editingSeries = false },
+            onConfirm = { selected -> vm.saveSeries(selected) { editingSeries = false } },
+        )
+    }
+}
+
+@Composable
+private fun CollectionSeriesPickerDialog(
+    collectionName: String,
+    series: List<Series>,
+    selectedIds: Set<Long>,
+    onDismiss: () -> Unit,
+    onConfirm: (Set<Long>) -> Unit,
+) {
+    var selected by remember(selectedIds) { mutableStateOf(selectedIds) }
+    var query by remember { mutableStateOf("") }
+    val filtered = series.filter {
+        query.isBlank() || it.displayName.contains(query, ignoreCase = true) || it.publisher?.contains(query, ignoreCase = true) == true
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Séries da coleção") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(collectionName, style = MaterialTheme.typography.titleSmall)
+                Text("Uma série pode pertencer a várias coleções.", style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = { Text("Buscar série") },
+                    leadingIcon = { Icon(Icons.Default.Search, null) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                when {
+                    series.isEmpty() -> Text("Nenhuma série foi criada ainda.")
+                    filtered.isEmpty() -> Text("Nenhuma série encontrada.")
+                    else -> LazyColumn(Modifier.heightIn(max = 380.dp)) {
+                        items(filtered, key = Series::id) { item ->
+                            val checked = item.id in selected
+                            ListItem(
+                                modifier = Modifier.clickable { selected = if (checked) selected - item.id else selected + item.id },
+                                headlineContent = { Text(item.displayName) },
+                                supportingContent = { Text("${item.bookCount} livro(s)") },
+                                leadingContent = { Checkbox(checked, null) },
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onConfirm(selected) }) { Text("Salvar") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+    )
 }
 
 data class BookCollectionsUiState(

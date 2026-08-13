@@ -2,6 +2,15 @@ package com.arthur.ereader.domain.model
 
 enum class BookFormat { EPUB, PDF, CBZ }
 enum class ContentType { BOOK, DOCUMENT, COMIC, MANGA }
+enum class PublicationType { NORMAL, ANNUAL, SPECIAL, ONE_SHOT, VOLUME }
+enum class ProcessingStatus { PENDING, PROCESSING, ORGANIZED, NEEDS_REVIEW, FAILED }
+enum class AutomationMode { AUTOMATIC, ASK, DISABLED }
+enum class OrganizationChildType { COLLECTION, SERIES, BOOK }
+enum class ManualOverrideAction { FORCE_ADD, FORCE_REMOVE }
+enum class RuleField { SERIES, PUBLISHER, FORMAT, CONTENT_TYPE, AUTHOR, TITLE, ISBN, YEAR, PUBLICATION_TYPE }
+enum class RuleMatch { EQUALS, NOT_EQUALS, CONTAINS, STARTS_WITH, REGEX, GREATER_OR_EQUAL, LESS_OR_EQUAL }
+enum class RuleScope { LIBRARY, COMICS, MANGA, EPUB, PDF, FOLDER, IMPORT }
+enum class RuleActionType { ADD_TO_COLLECTION, REMOVE_FROM_COLLECTION, CREATE_COLLECTION }
 
 data class Book(
     val id: Long = 0,
@@ -15,6 +24,15 @@ data class Book(
     val dateAdded: Long = System.currentTimeMillis(),
     val lastReadAt: Long? = null,
     val favorite: Boolean = false,
+    val fileHash: String? = null,
+    val seriesId: Long? = null,
+    val volume: Double? = null,
+    val number: Double? = null,
+    val publicationType: PublicationType = PublicationType.NORMAL,
+    val year: Int? = null,
+    val processingStatus: ProcessingStatus = ProcessingStatus.PENDING,
+    val publisher: String? = null,
+    val isbn: String? = null,
 )
 
 /** A versioned, format-specific position safe to store in Room. */
@@ -58,6 +76,85 @@ data class BookCollection(
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
     val bookCount: Int = 0,
+)
+
+data class Series(
+    val id: Long = 0,
+    val canonicalName: String,
+    val displayName: String = canonicalName,
+    val year: Int? = null,
+    val publisher: String? = null,
+    val createdAt: Long = System.currentTimeMillis(),
+    val bookCount: Int = 0,
+)
+
+data class OrganizationSuggestion(
+    val bookId: Long,
+    val detectedSeries: String?,
+    val confidence: Int,
+    val publicationType: PublicationType,
+    val volume: Double?,
+    val number: Double?,
+    val warnings: List<String> = emptyList(),
+    val requiresConfirmation: Boolean = true,
+    val suggestedContentType: ContentType? = null,
+    val suggestedAuthor: String? = null,
+)
+
+data class OrganizationRule(
+    val id: Long = 0,
+    val name: String,
+    val field: RuleField,
+    val match: RuleMatch = RuleMatch.EQUALS,
+    val value: String,
+    val targetCollectionId: Long,
+    val enabled: Boolean = true,
+    val createdAt: Long = System.currentTimeMillis(),
+)
+
+data class RuleCondition(
+    val id: Long = 0,
+    val field: RuleField,
+    val match: RuleMatch,
+    val value: String,
+)
+
+data class RuleAction(
+    val id: Long = 0,
+    val type: RuleActionType,
+    val targetCollectionId: Long? = null,
+    val collectionName: String? = null,
+)
+
+data class AdvancedOrganizationRule(
+    val id: Long = 0,
+    val name: String,
+    val scope: RuleScope = RuleScope.LIBRARY,
+    val scopeValue: String? = null,
+    val priority: Int = 0,
+    val enabled: Boolean = true,
+    val conditions: List<RuleCondition>,
+    val actions: List<RuleAction>,
+    val createdAt: Long = System.currentTimeMillis(),
+)
+
+data class ExternalMetadataSuggestion(
+    val providerId: String,
+    val title: String,
+    val authors: List<String> = emptyList(),
+    val publisher: String? = null,
+    val year: Int? = null,
+    val isbn: String? = null,
+    val series: String? = null,
+    val number: Double? = null,
+    val coverUrl: String? = null,
+    val sourceUrl: String? = null,
+)
+
+data class SeriesWithBooks(
+    val series: Series,
+    val books: List<Book>,
+    val possibleMissingNumbers: List<Int> = emptyList(),
 )
 
 data class Bookmark(val id: Long = 0, val bookId: Long, val locator: ReaderLocator, val title: String? = null, val createdAt: Long = System.currentTimeMillis())

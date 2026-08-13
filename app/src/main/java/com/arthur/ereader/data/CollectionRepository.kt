@@ -4,6 +4,9 @@ import android.database.sqlite.SQLiteConstraintException
 import com.arthur.ereader.data.local.CollectionDao
 import com.arthur.ereader.data.local.CollectionEntity
 import com.arthur.ereader.data.local.CollectionWithCount
+import com.arthur.ereader.data.local.CollectionRelationEntity
+import com.arthur.ereader.data.local.OrganizationDao
+import com.arthur.ereader.data.local.ManualOverrideEntity
 import com.arthur.ereader.domain.model.BookCollection
 import com.arthur.ereader.domain.model.CollectionColor
 import kotlinx.coroutines.flow.combine
@@ -15,6 +18,7 @@ import javax.inject.Singleton
 class CollectionRepository @Inject constructor(
     private val dao: CollectionDao,
     private val books: BookRepository,
+    private val organization: OrganizationDao,
 ) {
     fun observeCollections() = dao.observeAll().map { items -> items.map(::toDomain) }
 
@@ -40,8 +44,32 @@ class CollectionRepository @Inject constructor(
     }.mapConstraintError()
 
     suspend fun delete(id: Long) = dao.delete(id)
-    suspend fun setCollectionsForBook(bookId: Long, collectionIds: Set<Long>) = dao.replaceCollectionsForBook(bookId, collectionIds)
-    suspend fun setBooksInCollection(collectionId: Long, bookIds: Set<Long>) = dao.replaceBooksInCollection(collectionId, bookIds)
+    suspend fun setCollectionsForBook(bookId: Long, collectionIds: Set<Long>) {
+        val previous = dao.collectionIdsForBook(bookId).toSet()
+        dao.replaceCollectionsForBook(bookId, collectionIds)
+        organization.deleteRelationsForChild("BOOK", bookId)
+        val now = System.currentTimeMillis()
+        collectionIds.forEach { organization.insertRelation(CollectionRelationEntity(it, "BOOK", bookId, now)) }
+        (collectionIds - previous).forEach { collectionId ->
+            organization.saveOverride(ManualOverrideEntity(entityType = "BOOK", entityId = bookId, relationType = "COLLECTION", targetId = collectionId, action = "FORCE_ADD", createdAt = now))
+        }
+        (previous - collectionIds).forEach { collectionId ->
+            organization.saveOverride(ManualOverrideEntity(entityType = "BOOK", entityId = bookId, relationType = "COLLECTION", targetId = collectionId, action = "FORCE_REMOVE", createdAt = now))
+        }
+    }
+    suspend fun setBooksInCollection(collectionId: Long, bookIds: Set<Long>) {
+        val previous = dao.bookIds(collectionId).toSet()
+        dao.replaceBooksInCollection(collectionId, bookIds)
+        organization.deleteChildrenOfType(collectionId, "BOOK")
+        val now = System.currentTimeMillis()
+        bookIds.forEach { organization.insertRelation(CollectionRelationEntity(collectionId, "BOOK", it, now)) }
+        (bookIds - previous).forEach { bookId ->
+            organization.saveOverride(ManualOverrideEntity(entityType = "BOOK", entityId = bookId, relationType = "COLLECTION", targetId = collectionId, action = "FORCE_ADD", createdAt = now))
+        }
+        (previous - bookIds).forEach { bookId ->
+            organization.saveOverride(ManualOverrideEntity(entityType = "BOOK", entityId = bookId, relationType = "COLLECTION", targetId = collectionId, action = "FORCE_REMOVE", createdAt = now))
+        }
+    }
 
     private fun validate(name: String, description: String): Pair<String, String> {
         val cleanName = name.trim()

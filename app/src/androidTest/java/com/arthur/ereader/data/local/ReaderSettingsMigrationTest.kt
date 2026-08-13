@@ -25,7 +25,7 @@ class ReaderSettingsMigrationTest {
     }
 
     @Test
-    fun migration2To7PreservesSettingsAndAddsCollections() {
+    fun migration2To9PreservesSettingsAndAddsOrganization() {
         context.deleteDatabase(DB_NAME)
         val callback = object : SupportSQLiteOpenHelper.Callback(2) {
             override fun onCreate(db: SupportSQLiteDatabase) {
@@ -86,6 +86,8 @@ class ReaderSettingsMigrationTest {
         }
         db.execSQL("INSERT INTO collections (id,name,description,color,createdAt,updatedAt) VALUES (3,'Estudos','Técnicos','BLUE',1,1)")
         db.execSQL("INSERT INTO book_collection_cross_ref (bookId,collectionId) VALUES (7,3)")
+        AppModule.migration7To8.migrate(db)
+        AppModule.migration8To9.migrate(db)
         db.query("SELECT COUNT(*) FROM book_collection_cross_ref WHERE bookId=7 AND collectionId=3").use {
             assertTrue(it.moveToFirst())
             assertEquals(1, it.getInt(0))
@@ -93,6 +95,41 @@ class ReaderSettingsMigrationTest {
         db.query("SELECT title FROM books WHERE id=7").use {
             assertTrue(it.moveToFirst())
             assertEquals("Livro", it.getString(0))
+        }
+        db.query("SELECT fileHash, seriesId, publicationType, processingStatus FROM books WHERE id=7").use {
+            assertTrue(it.moveToFirst())
+            assertTrue(it.isNull(0))
+            assertTrue(it.isNull(1))
+            assertEquals("NORMAL", it.getString(2))
+            assertEquals("PENDING", it.getString(3))
+        }
+        db.query("SELECT COUNT(*) FROM collection_relations WHERE parentCollectionId=3 AND childType='BOOK' AND childId=7").use {
+            assertTrue(it.moveToFirst())
+            assertEquals(1, it.getInt(0))
+        }
+        db.query("SELECT publisher, isbn FROM books WHERE id=7").use {
+            assertTrue(it.moveToFirst())
+            assertTrue(it.isNull(0))
+            assertTrue(it.isNull(1))
+        }
+        db.execSQL("INSERT INTO organization_rules(name,field,match,value,targetCollectionId,enabled,createdAt) VALUES ('PDFs DC','PUBLISHER','EQUALS','DC',3,1,1)")
+        db.query("SELECT COUNT(*) FROM organization_rules WHERE targetCollectionId=3").use {
+            assertTrue(it.moveToFirst())
+            assertEquals(1, it.getInt(0))
+        }
+        AppModule.migration9To10.migrate(db)
+        db.query("SELECT scope, priority FROM advanced_rules WHERE name='PDFs DC'").use {
+            assertTrue(it.moveToFirst())
+            assertEquals("LIBRARY", it.getString(0))
+            assertEquals(0, it.getInt(1))
+        }
+        db.query("SELECT COUNT(*) FROM rule_conditions WHERE field='PUBLISHER' AND value='DC'").use {
+            assertTrue(it.moveToFirst())
+            assertEquals(1, it.getInt(0))
+        }
+        db.query("SELECT COUNT(*) FROM rule_actions WHERE actionType='ADD_TO_COLLECTION' AND targetCollectionId=3").use {
+            assertTrue(it.moveToFirst())
+            assertEquals(1, it.getInt(0))
         }
     }
 

@@ -22,6 +22,7 @@ import org.readium.r2.shared.util.http.DefaultHttpClient
 import org.readium.r2.streamer.PublicationOpener
 import org.readium.r2.streamer.parser.epub.EpubParser
 import java.io.File
+import java.io.ByteArrayInputStream
 import java.util.zip.ZipFile
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -33,6 +34,25 @@ class BookCoverGenerator @Inject constructor(
     @ApplicationContext private val context: Context,
     private val resolver: ContentResolver,
 ) {
+    suspend fun saveExternal(bookId: Long, bytes: ByteArray): String? = withContext(Dispatchers.IO) {
+        if (bytes.isEmpty() || bytes.size > MAX_EXTERNAL_COVER_BYTES) return@withContext null
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeStream(ByteArrayInputStream(bytes), null, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0 || bounds.outWidth > MAX_SOURCE_EDGE || bounds.outHeight > MAX_SOURCE_EDGE) {
+            return@withContext null
+        }
+        val bitmap = BitmapFactory.decodeStream(
+            ByteArrayInputStream(bytes),
+            null,
+            BitmapFactory.Options().apply { inSampleSize = sampleSize(bounds.outWidth, bounds.outHeight) },
+        )?.scaledToFit() ?: return@withContext null
+        try {
+            saveBitmap(bookId, bitmap)
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
     suspend fun generate(book: Book): String? = withContext(Dispatchers.IO) {
         val bitmap = runCatching {
             when (book.format) {
@@ -43,17 +63,7 @@ class BookCoverGenerator @Inject constructor(
         }.getOrNull() ?: return@withContext null
 
         try {
-            val directory = File(context.filesDir, COVER_DIRECTORY).apply { mkdirs() }
-            val target = File(directory, "${book.id}.jpg")
-            val flattened = flatten(bitmap)
-            try {
-                target.outputStream().buffered().use { output ->
-                    check(flattened.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, output))
-                }
-            } finally {
-                if (flattened !== bitmap) flattened.recycle()
-            }
-            target.toURI().toString()
+            saveBitmap(book.id, bitmap)
         } finally {
             bitmap.recycle()
         }
@@ -61,6 +71,20 @@ class BookCoverGenerator @Inject constructor(
 
     fun delete(bookId: Long) {
         File(File(context.filesDir, COVER_DIRECTORY), "$bookId.jpg").delete()
+    }
+
+    private fun saveBitmap(bookId: Long, bitmap: Bitmap): String {
+        val directory = File(context.filesDir, COVER_DIRECTORY).apply { mkdirs() }
+        val target = File(directory, "$bookId.jpg")
+        val flattened = flatten(bitmap)
+        try {
+            target.outputStream().buffered().use { output ->
+                check(flattened.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, output))
+            }
+        } finally {
+            if (flattened !== bitmap) flattened.recycle()
+        }
+        return target.toURI().toString()
     }
 
     private fun pdfCover(book: Book): Bitmap? =
@@ -158,6 +182,8 @@ class BookCoverGenerator @Inject constructor(
         const val MAX_DECODE_EDGE = 1800
         const val JPEG_QUALITY = 88
         const val MAX_ARCHIVE_IMAGE_BYTES = 80L * 1024 * 1024
+        const val MAX_EXTERNAL_COVER_BYTES = 10 * 1024 * 1024
+        const val MAX_SOURCE_EDGE = 12_000
         val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp")
     }
 }

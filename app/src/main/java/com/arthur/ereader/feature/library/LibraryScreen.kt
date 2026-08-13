@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.CollectionsBookmark
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -73,6 +74,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.arthur.ereader.data.BookRepository
 import com.arthur.ereader.data.LibraryPreferences
+import com.arthur.ereader.data.DuplicateCandidate
 import com.arthur.ereader.domain.model.Book
 import com.arthur.ereader.domain.model.BookFormat
 import com.arthur.ereader.domain.model.ContentType
@@ -117,6 +119,7 @@ class LibraryViewModel @Inject constructor(
     val messages = _messages.asSharedFlow()
     private val _importing = MutableStateFlow(false)
     val importing = _importing.asStateFlow()
+    val duplicateCandidates = books.duplicateCandidates
 
     val state = combine(
         books.observeWithProgress(),
@@ -137,7 +140,9 @@ class LibraryViewModel @Inject constructor(
             }
             .filter { item ->
                 search.isBlank() || item.book.title.contains(search, ignoreCase = true) ||
-                    item.book.author?.contains(search, ignoreCase = true) == true
+                    item.book.author?.contains(search, ignoreCase = true) == true ||
+                    item.book.publisher?.contains(search, ignoreCase = true) == true ||
+                    item.book.isbn?.contains(search, ignoreCase = true) == true
             }
             .toList()
             .sortedWith(sort.comparator())
@@ -161,6 +166,21 @@ class LibraryViewModel @Inject constructor(
     }
     fun favorite(book: Book) = viewModelScope.launch { books.favorite(book.id, !book.favorite) }
     fun remove(book: Book) = viewModelScope.launch { books.delete(book.id) }
+    fun reprocess(book: Book) = viewModelScope.launch {
+        books.reprocessBook(book.id).fold(
+            onSuccess = {
+                val result = if (it.requiresConfirmation) "Análise concluída; revise a sugestão em Séries." else "Organização atualizada."
+                val warnings = it.warnings.takeIf(List<String>::isNotEmpty)?.joinToString(prefix = " ", separator = " ").orEmpty()
+                _messages.emit(result + warnings)
+            },
+            onFailure = { _messages.emit(it.message ?: "Não foi possível reprocessar o item.") },
+        )
+    }
+    fun confirmDuplicate(candidate: DuplicateCandidate) = viewModelScope.launch {
+        books.confirmDuplicate(candidate)
+        _messages.emit("Arquivo substituído; leitura e organização foram preservadas.")
+    }
+    fun cancelDuplicate(candidate: DuplicateCandidate) = books.cancelDuplicate(candidate)
     fun setFilter(value: LibraryFilter) { filter.value = value }
     fun setQuery(value: String) { query.value = value }
     fun setLayout(value: LibraryLayoutMode) = viewModelScope.launch { preferences.setLayout(value) }
@@ -184,8 +204,10 @@ fun LibraryScreen(
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val importing by vm.importing.collectAsStateWithLifecycle()
+    val duplicateCandidates by vm.duplicateCandidates.collectAsStateWithLifecycle()
     var removeCandidate by remember { mutableStateOf<Book?>(null) }
     var collectionCandidate by remember { mutableStateOf<Book?>(null) }
+    var externalMetadataCandidate by remember { mutableStateOf<Book?>(null) }
     val snackbar = remember { SnackbarHostState() }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments(), vm::import)
     LaunchedEffect(vm) { vm.messages.collect { snackbar.showSnackbar(it) } }
@@ -233,6 +255,8 @@ fun LibraryScreen(
                     onOpen = onOpenBook,
                     onFavorite = vm::favorite,
                     onCollections = { collectionCandidate = it },
+                    onReprocess = vm::reprocess,
+                    onExternalMetadata = { externalMetadataCandidate = it },
                     onRemove = { removeCandidate = it },
                     modifier = Modifier.weight(1f),
                 )
@@ -242,6 +266,8 @@ fun LibraryScreen(
                     onOpen = onOpenBook,
                     onFavorite = vm::favorite,
                     onCollections = { collectionCandidate = it },
+                    onReprocess = vm::reprocess,
+                    onExternalMetadata = { externalMetadataCandidate = it },
                     onRemove = { removeCandidate = it },
                     modifier = Modifier.weight(1f),
                 )
@@ -262,6 +288,18 @@ fun LibraryScreen(
     }
     collectionCandidate?.let { book ->
         BookCollectionsDialog(book = book, onDismiss = { collectionCandidate = null })
+    }
+    externalMetadataCandidate?.let { book ->
+        ExternalMetadataDialog(book = book, onDismiss = { externalMetadataCandidate = null })
+    }
+    duplicateCandidates.firstOrNull()?.let { candidate ->
+        AlertDialog(
+            onDismissRequest = { vm.cancelDuplicate(candidate) },
+            title = { Text("Conteúdo duplicado") },
+            text = { Text("Este conteúdo já existe. Deseja substituir a referência do arquivo e manter progresso, favoritos, série e coleções?") },
+            confirmButton = { TextButton(onClick = { vm.confirmDuplicate(candidate) }) { Text("Substituir") } },
+            dismissButton = { TextButton(onClick = { vm.cancelDuplicate(candidate) }) { Text("Cancelar") } },
+        )
     }
 }
 
@@ -353,6 +391,8 @@ private fun LibraryGrid(
     onOpen: (Book) -> Unit,
     onFavorite: (Book) -> Unit,
     onCollections: (Book) -> Unit,
+    onReprocess: (Book) -> Unit,
+    onExternalMetadata: (Book) -> Unit,
     onRemove: (Book) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -364,13 +404,13 @@ private fun LibraryGrid(
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         items(items, key = { it.book.id }) { item ->
-            BookGridItem(item, { onOpen(item.book) }, { onFavorite(item.book) }, { onCollections(item.book) }, { onRemove(item.book) })
+            BookGridItem(item, { onOpen(item.book) }, { onFavorite(item.book) }, { onCollections(item.book) }, { onReprocess(item.book) }, { onExternalMetadata(item.book) }, { onRemove(item.book) })
         }
     }
 }
 
 @Composable
-private fun BookGridItem(item: LibraryBook, onOpen: () -> Unit, onFavorite: () -> Unit, onCollections: () -> Unit, onRemove: () -> Unit) {
+private fun BookGridItem(item: LibraryBook, onOpen: () -> Unit, onFavorite: () -> Unit, onCollections: () -> Unit, onReprocess: () -> Unit, onExternalMetadata: () -> Unit, onRemove: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     val progress = item.progress?.percentage ?: 0f
     Column(Modifier.clickable(onClick = onOpen)) {
@@ -378,7 +418,7 @@ private fun BookGridItem(item: LibraryBook, onOpen: () -> Unit, onFavorite: () -
             BookCover(item.book, Modifier.fillMaxWidth().aspectRatio(2f / 3f))
             Box(Modifier.align(Alignment.TopEnd)) {
                 IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Ações") }
-                BookMenu(menu, { menu = false }, item.book.favorite, onFavorite, onCollections, onRemove)
+                BookMenu(menu, { menu = false }, item.book.favorite, onFavorite, onCollections, onReprocess, onExternalMetadata, onRemove)
             }
         }
         Text(
@@ -405,19 +445,21 @@ private fun LibraryList(
     onOpen: (Book) -> Unit,
     onFavorite: (Book) -> Unit,
     onCollections: (Book) -> Unit,
+    onReprocess: (Book) -> Unit,
+    onExternalMetadata: (Book) -> Unit,
     onRemove: (Book) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(modifier, contentPadding = PaddingValues(top = 12.dp, bottom = 96.dp)) {
         items(items, key = { it.book.id }) { item ->
-            BookListItem(item, { onOpen(item.book) }, { onFavorite(item.book) }, { onCollections(item.book) }, { onRemove(item.book) })
+            BookListItem(item, { onOpen(item.book) }, { onFavorite(item.book) }, { onCollections(item.book) }, { onReprocess(item.book) }, { onExternalMetadata(item.book) }, { onRemove(item.book) })
             HorizontalDivider(Modifier.padding(start = 104.dp))
         }
     }
 }
 
 @Composable
-private fun BookListItem(item: LibraryBook, onOpen: () -> Unit, onFavorite: () -> Unit, onCollections: () -> Unit, onRemove: () -> Unit) {
+private fun BookListItem(item: LibraryBook, onOpen: () -> Unit, onFavorite: () -> Unit, onCollections: () -> Unit, onReprocess: () -> Unit, onExternalMetadata: () -> Unit, onRemove: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     val progress = item.progress?.percentage ?: 0f
     Row(
@@ -436,7 +478,7 @@ private fun BookListItem(item: LibraryBook, onOpen: () -> Unit, onFavorite: () -
         }
         Box {
             IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Ações") }
-            BookMenu(menu, { menu = false }, item.book.favorite, onFavorite, onCollections, onRemove)
+            BookMenu(menu, { menu = false }, item.book.favorite, onFavorite, onCollections, onReprocess, onExternalMetadata, onRemove)
         }
     }
 }
@@ -448,6 +490,8 @@ private fun BookMenu(
     favorite: Boolean,
     onFavorite: () -> Unit,
     onCollections: () -> Unit,
+    onReprocess: () -> Unit,
+    onExternalMetadata: () -> Unit,
     onRemove: () -> Unit,
 ) {
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
@@ -455,6 +499,16 @@ private fun BookMenu(
             text = { Text(if (favorite) "Remover dos favoritos" else "Adicionar aos favoritos") },
             leadingIcon = { Icon(if (favorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder, null) },
             onClick = { onDismiss(); onFavorite() },
+        )
+        DropdownMenuItem(
+            text = { Text("Reprocessar organização") },
+            leadingIcon = { Icon(Icons.Default.Refresh, null) },
+            onClick = { onDismiss(); onReprocess() },
+        )
+        DropdownMenuItem(
+            text = { Text("Buscar metadados online…") },
+            leadingIcon = { Icon(Icons.Default.Search, null) },
+            onClick = { onDismiss(); onExternalMetadata() },
         )
         DropdownMenuItem(
             text = { Text("Coleções…") },

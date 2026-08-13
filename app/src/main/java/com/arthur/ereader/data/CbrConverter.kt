@@ -65,6 +65,10 @@ class CbrConverter @Inject constructor(
                     .filter { it.fileName.substringAfterLast('.', "").lowercase() in IMAGE_EXTENSIONS }
                     .toList()
                     .sortedWith(compareBy { naturalSortKey(it.fileName) })
+                val comicInfo = headers.firstOrNull {
+                    !it.isDirectory && it.fileName.substringAfterLast('/').substringAfterLast('\\')
+                        .equals("ComicInfo.xml", ignoreCase = true)
+                }
                 if (images.isEmpty()) throw CbrConversionException("Este CBR não contém imagens compatíveis.")
                 if (images.size > MAX_ARCHIVE_ENTRIES) {
                     throw CbrConversionException("O CBR contém páginas demais para ser importado com segurança.")
@@ -72,6 +76,27 @@ class CbrConverter @Inject constructor(
 
                 var totalBytes = 0L
                 ZipOutputStream(output.outputStream().buffered()).use { zip ->
+                    comicInfo?.let { header ->
+                        if (header.fullUnpackSize in 0L..MAX_COMIC_INFO_BYTES) {
+                            pageCopy = File.createTempFile("cbr-metadata-", ".xml", context.cacheDir)
+                            val checksum = CRC32()
+                            CheckedOutputStream(
+                                LimitedOutputStream(pageCopy!!.outputStream().buffered(), MAX_COMIC_INFO_BYTES),
+                                checksum,
+                            ).use { metadataOutput -> archive.extractFile(header, metadataOutput) }
+                            val metadataEntry = ZipEntry("ComicInfo.xml").apply {
+                                method = ZipEntry.STORED
+                                size = pageCopy!!.length()
+                                compressedSize = size
+                                crc = checksum.value
+                            }
+                            zip.putNextEntry(metadataEntry)
+                            pageCopy!!.inputStream().buffered().use { it.copyTo(zip) }
+                            zip.closeEntry()
+                            pageCopy!!.delete()
+                            pageCopy = null
+                        }
+                    }
                     images.forEachIndexed { index, header ->
                         coroutineContext.ensureActive()
                         val declaredSize = header.fullUnpackSize
@@ -160,6 +185,7 @@ class CbrConverter @Inject constructor(
         const val MAX_PAGE_BYTES = 80L * 1024 * 1024
         const val MAX_SOURCE_BYTES = 2L * 1024 * 1024 * 1024
         const val MAX_TOTAL_BYTES = 2L * 1024 * 1024 * 1024
+        const val MAX_COMIC_INFO_BYTES = 512L * 1024
         val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp")
     }
 }

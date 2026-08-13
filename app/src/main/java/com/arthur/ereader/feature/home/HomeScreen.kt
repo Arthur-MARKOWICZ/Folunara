@@ -23,6 +23,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.arthur.ereader.data.BookRepository
+import com.arthur.ereader.data.DuplicateCandidate
 import com.arthur.ereader.domain.model.Book
 import com.arthur.ereader.domain.model.LibraryBook
 import com.arthur.ereader.ui.components.BookCover
@@ -42,6 +43,7 @@ class HomeViewModel @Inject constructor(private val books: BookRepository) : Vie
     val messages = _messages.asSharedFlow()
     private val _importing = MutableStateFlow(false)
     val importing = _importing.asStateFlow()
+    val duplicateCandidates = books.duplicateCandidates
     val state = books.observeWithProgress().map { source ->
         HomeUiState(
             reading = source.filter { (it.progress?.percentage ?: 0f) in 0.001f..0.999f }
@@ -50,6 +52,13 @@ class HomeViewModel @Inject constructor(private val books: BookRepository) : Vie
             recent = source.sortedByDescending { it.book.dateAdded }.take(5),
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
+
+    init {
+        viewModelScope.launch {
+            books.resumeInterruptedImports()
+            books.resumeInterruptedOrganization()
+        }
+    }
 
     fun import(uris: List<Uri>) = viewModelScope.launch {
         if (uris.isEmpty()) return@launch
@@ -60,6 +69,11 @@ class HomeViewModel @Inject constructor(private val books: BookRepository) : Vie
             _importing.value = false
         }
     }
+    fun confirmDuplicate(candidate: DuplicateCandidate) = viewModelScope.launch {
+        books.confirmDuplicate(candidate)
+        _messages.emit("Arquivo substituído; leitura e organização foram preservadas.")
+    }
+    fun cancelDuplicate(candidate: DuplicateCandidate) = books.cancelDuplicate(candidate)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -73,6 +87,7 @@ fun HomeScreen(
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val importing by vm.importing.collectAsStateWithLifecycle()
+    val duplicateCandidates by vm.duplicateCandidates.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments(), vm::import)
     LaunchedEffect(vm) { vm.messages.collect { snackbar.showSnackbar(it) } }
@@ -127,6 +142,15 @@ fun HomeScreen(
                 }
             }
         }
+    }
+    duplicateCandidates.firstOrNull()?.let { candidate ->
+        AlertDialog(
+            onDismissRequest = { vm.cancelDuplicate(candidate) },
+            title = { Text("Conteúdo duplicado") },
+            text = { Text("Este conteúdo já existe. Substituir a referência do arquivo mantendo progresso e organização?") },
+            confirmButton = { TextButton(onClick = { vm.confirmDuplicate(candidate) }) { Text("Substituir") } },
+            dismissButton = { TextButton(onClick = { vm.cancelDuplicate(candidate) }) { Text("Cancelar") } },
+        )
     }
 }
 
